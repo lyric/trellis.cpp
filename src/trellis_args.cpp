@@ -39,8 +39,9 @@ void print_usage(const char* argv0, bool server) {
         "      --band N            narrow-band DC remesh band width (default: auto —\n"
         "                          res/512, i.e. 1 @512 / 2 @1024, which suppresses the\n"
         "                          res-1024 outer-skin speckle; N forces that width)\n"
-        "      --decim GRID        legacy cluster-grid decimation (default: quadric\n"
-        "                          simplify to 300K faces @1024 / 150K @512; 0 = none)\n"
+        "      --decim GRID        legacy cluster-grid decimation (-1 = QEM, 0 = none)\n"
+        "      --faces N           QEM face target (textured default: 300K @1024 / 150K\n"
+        "                          @512; geometry-only default: keep full mesh)\n"
         "      --atlas PX          UV atlas size (default 2048 @1024 / 1024 @512)\n"
         "      --tex-res N         texture PBR resolution 512/1024 (default: auto — drops\n"
         "                          a dense res-1024 decode to a clean res-512 PBR volume)\n"
@@ -91,6 +92,7 @@ bool parse_args(int argc, char** argv, TrellisParams& p) {
         else if (a == "--box-uv")               { p.xatlas = false; }
         else if (a == "--band")                 { const char* v = need(a.c_str()); if (!v) return false; p.band = atoi(v); }
         else if (a == "--decim")                { const char* v = need(a.c_str()); if (!v) return false; p.decim = atoi(v); }
+        else if (a == "--faces")                { const char* v = need(a.c_str()); if (!v) return false; p.faces = atoi(v); if (p.faces < 0) { fprintf(stderr, "[trellis] --faces must be non-negative\n"); return false; } }
         else if (a == "--atlas" || a == "--tex"){ const char* v = need(a.c_str()); if (!v) return false; p.tex = atoi(v); }
         else if (a == "--tex-res")              { const char* v = need(a.c_str()); if (!v) return false; p.tex_res = atoi(v); }
         else if (a == "--webp")                 { const char* v = need(a.c_str()); if (!v) return false;

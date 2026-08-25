@@ -114,7 +114,8 @@ The most useful ones:
 | `--res 512\|1024\|1536` | geometry resolution (512 = light path, no cascade) |
 | `--bg-removal threshold\|birefnet` | default **auto**: pre-matted images keep their alpha, otherwise the BiRefNet matte (~13s on GPU). The plain white-bg keyer cuts specular highlights out of the alpha — the flow then generates holes there — so it is opt-in only |
 | `--no-texture` | geometry only |
-| `--decim GRID` | legacy cluster-grid decimation (default: quadric simplify to 300K faces @1024 / 150K @512; `0` = keep the full-res mesh) |
+| `--decim GRID` | legacy cluster-grid decimation (`-1` selects QEM; `0` keeps the full-resolution mesh) |
+| `--faces N` | QEM target face count; textured defaults remain 300K at 1024 and 150K at 512, while geometry-only output is simplified only when this is set |
 | `--atlas PX` | UV atlas size (default 2048 @1024 / 1024 @512) |
 | `--box-uv` | voxel-native 6-way box projection instead of the default xatlas unwrap (O(faces), faster, looser packing) |
 | `--seed N` | RNG seed |
@@ -140,7 +141,16 @@ behavior-driving environment variables remain — use the flags above.
 ### Resumable geometry
 
 A shape checkpoint is written after sparse-structure and shape-SLAT generation,
-before shape decoding and mesh postprocessing:
+before shape decoding and mesh postprocessing. Geometry-only output can use the
+same Vulkan/CPU QEM simplifier as textured output without rerunning generation:
+
+```bash
+trellis-cli input.png mesh.glb --no-texture --faces 500000 --checkpoint mesh.trellis-checkpoint
+```
+
+The checkpoint itself remains independent of the face target, so a resumed
+shape can be exported again with a different `--faces` value.
+
 
 ```bash
 trellis-cli input.png output.glb --checkpoint output.trellis-checkpoint
@@ -167,7 +177,8 @@ separate unversioned decoder-debug artifact and is not accepted by `--resume`.
 GET  /health     -> "ok"
 POST /generate      multipart/form-data with an "image" file part; optional text
                     fields "seed", "resolution" (512/1024/1536), "bg_removal"
-                    (threshold|birefnet). Returns model/gltf-binary.
+                    (threshold|birefnet), "uv", "band", "faces", and "webp".
+                    Returns model/gltf-binary.
 ```
 
 Launch-time flags (including `--res`) set the per-request defaults; each request can

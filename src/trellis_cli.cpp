@@ -312,6 +312,26 @@ int trellis_run(const trellis::TrellisParams& cfg) {
             printf("      [dump] pre-remesh mesh -> %s\n", dp); fflush(stdout); }
     }
 
+    if (!do_tex && (cfg.decim > 0 || (cfg.decim < 0 && cfg.faces > 0))) {
+        printf("[6/7] geometry mesh cleanup + simplification\n");
+        trellis::weld_vertices(mesh.verts, mesh.faces, nullptr, 1.0f / ((float)so.res * 8.0f));
+        trellis::fill_small_holes(mesh.faces);
+        vector<float> simplified, positions;
+        vector<int32_t> simplified_faces;
+        if (cfg.decim > 0) {
+            trellis::decimate_cluster(mesh.verts, mesh.V(), mesh.faces, mesh.F(), {}, cfg.decim, simplified, simplified_faces, positions);
+        } else {
+            trellis::decimate_qem(mesh.verts, mesh.V(), mesh.faces, mesh.F(), cfg.faces, simplified, simplified_faces);
+            trellis::weld_vertices(simplified, simplified_faces, nullptr, 1.0f / ((float)so.res * 8.0f));
+            trellis::fill_small_holes(simplified_faces);
+            int ndrop = trellis::drop_small_components(simplified, simplified_faces, 0.03f);
+            if (ndrop) printf("      dropped %d small components\n", ndrop);
+        }
+        mesh.verts = std::move(simplified);
+        mesh.faces = std::move(simplified_faces);
+        printf("      simplified mesh V=%d F=%d\n", mesh.V(), mesh.F());
+    }
+
     vector<float> colors, pbr6;   // colors = base RGB (PLY); pbr6 = per-vertex [V*6] for UV bake
     trellis::ShapeOut so_tex;                                    // res-512 tex-guide decode (mixed-res path)
     const vector<std::array<int,3>>* pbr_coords = &so.coords;    // coords/res the bake samples the PBR at
@@ -453,7 +473,7 @@ int trellis_run(const trellis::TrellisParams& cfg) {
             dv = sverts; df = sfaces;
         } else {
             trellis::decimate_qem(sverts, (int)sverts.size()/3, sfaces, (int)sfaces.size()/3,
-                                  cascade ? 300000 : 150000, dv, df);
+                                  cfg.faces > 0 ? cfg.faces : (cascade ? 300000 : 150000), dv, df);
             trellis::weld_vertices(dv, df, nullptr, 1.0f / ((float)so.res * 8.0f));
             trellis::fill_small_holes(df);
             // Second component pass on the decimated mesh: a hallucinated ground plane

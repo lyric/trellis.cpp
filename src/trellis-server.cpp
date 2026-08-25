@@ -5,7 +5,7 @@
 //                      fields "seed", "resolution" (512/1024/1536), "bg_removal"
 //                      (threshold|birefnet), "uv" (xatlas = default, unique
 //                      chart space; box = faster projection), "band" (narrow-band
-//                      DC remesh band width, default 1 — see --band). Returns
+//                      DC remesh band width), and "faces" (QEM target). Returns
 //                      model/gltf-binary.
 //
 // Launch-time defaults come from CLI flags (see trellis::parse_args);
@@ -99,6 +99,7 @@ int main(int argc, char** argv) {
         if (req.has_file("bg_removal")) p.birefnet = (req.get_file_value("bg_removal").content == "birefnet") ? 1 : 0;
         if (req.has_file("uv")) p.xatlas = (req.get_file_value("uv").content == "xatlas");
         if (req.has_file("band")) p.band = atoi(req.get_file_value("band").content.c_str());
+        if (req.has_file("faces")) { int faces = atoi(req.get_file_value("faces").content.c_str()); p.faces = faces > 0 ? faces : 0; }
         if (req.has_file("webp")) {
             const std::string& w = req.get_file_value("webp").content;
             p.webp = (w == "off" || w == "0" || w == "false") ? 0
