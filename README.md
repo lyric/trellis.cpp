@@ -119,6 +119,8 @@ The most useful ones:
 | `--box-uv` | voxel-native 6-way box projection instead of the default xatlas unwrap (O(faces), faster, looser packing) |
 | `--seed N` | RNG seed |
 | `--require-gpu` | fail instead of falling back to the (very slow, RAM-hungry) CPU path |
+| `--checkpoint PATH` | atomically save the completed shape-SLAT stage for recovery |
+| `--resume PATH --no-texture` | resume a geometry-only GLB from a shape checkpoint without rerunning image conditioning or flows |
 
 The postprocess matches the reference pipeline op for op (see
 `docs/spec/27-reference-postprocess.md` / `28-divergence-matrix.md`): the raw
@@ -134,6 +136,28 @@ quality is at parity with the reference CUDA postprocess on identical inputs.
 
 `TRELLIS_DBG_*` environment variables toggle developer debug logging only; no
 behavior-driving environment variables remain — use the flags above.
+
+### Resumable geometry
+
+A shape checkpoint is written after sparse-structure and shape-SLAT generation,
+before shape decoding and mesh postprocessing:
+
+```bash
+trellis-cli input.png output.glb --checkpoint output.trellis-checkpoint
+```
+
+If a later geometry, texturing, or export stage fails, recover the generated
+shape without rerunning the expensive flow stages:
+
+```bash
+trellis-cli --resume output.trellis-checkpoint --output recovered.glb --no-texture
+```
+
+Checkpoint files are versioned, bounds-checked, and atomically replaced. They
+record the generated shape latent, coordinates, resolution, seed, guidance, and
+token budget. Version 1 resumes geometry only because it intentionally does not
+store image conditioning or texture-flow RNG state. `--dump-slat` remains a
+separate unversioned decoder-debug artifact and is not accepted by `--resume`.
 
 ### trellis-server
 

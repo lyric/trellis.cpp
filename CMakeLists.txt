@@ -90,6 +90,7 @@ endif()
 # --- core library ----------------------------------------------------------
 add_library(trellis_core STATIC
   src/trellis_model.cpp
+  src/shape_checkpoint.cpp
   src/dit.cpp
   src/flow_runner.cpp
   src/ss_decoder.cpp
@@ -337,6 +338,10 @@ set_target_properties(trellis-test-sparse-degenerate PROPERTIES BUILD_RPATH "${G
 add_executable(trellis-test-shape-dec src/test_shape_dec.cpp)
 target_link_libraries(trellis-test-shape-dec PRIVATE trellis_core)
 set_target_properties(trellis-test-shape-dec PROPERTIES BUILD_RPATH "${GGML_RPATH}")
+
+add_executable(trellis-test-shape-checkpoint src/test_shape_checkpoint.cpp)
+target_link_libraries(trellis-test-shape-checkpoint PRIVATE trellis_core)
+set_target_properties(trellis-test-shape-checkpoint PROPERTIES BUILD_RPATH "${GGML_RPATH}")
 
 add_executable(trellis-cli src/trellis_cli_main.cpp src/trellis_cli.cpp src/trellis_args.cpp)
 target_link_libraries(trellis-cli PRIVATE trellis_core)

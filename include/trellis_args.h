@@ -57,6 +57,8 @@ struct TrellisParams {
     float gsh = 7.5f;           // shape-SLAT guidance strength
     bool voxply = false;        // dump out/myvox.ply              (debug)
     bool dump_slat = false;     // dump /tmp/hr_slat.bin           (debug)
+    std::string checkpoint;     // save a resumable shape-stage checkpoint
+    std::string resume;         // resume geometry from a shape-stage checkpoint
     bool dump_bg = false;       // also write the bg-removal cutout as <out>_cutout.png
     bool bg_only = false;       // background removal only: write the cutout and skip the rest
 

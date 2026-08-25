@@ -9,8 +9,8 @@ int main(int argc, char** argv) {
         trellis::print_usage(argv[0], /*server=*/false);
         return p.help ? 0 : 1;
     }
-    if (p.image.empty()) {
-        fprintf(stderr, "[trellis] no input image (give <image.png> or --image)\n");
+    if (p.image.empty() && p.resume.empty()) {
+        fprintf(stderr, "[trellis] no input image (give <image.png>, --image, or --resume)\n");
         trellis::print_usage(argv[0], /*server=*/false);
         return 1;
     }

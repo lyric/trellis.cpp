@@ -55,7 +55,9 @@ void print_usage(const char* argv0, bool server) {
         "      --gss F  --gsh F    guidance strengths\n"
         "      --host H  --port P  trellis-server bind address\n"
         "      --voxply            also dump the voxel point cloud as .ply\n"
-        "      --dump-slat         dump the structured latent to disk\n"
+        "      --dump-slat         dump the structured latent to disk (debug)\n"
+        "      --checkpoint PATH   atomically save a resumable shape-stage checkpoint\n"
+        "      --resume PATH       resume geometry from a checkpoint (requires --no-texture)\n"
         "  -h, --help              show this help\n");
 }
 
@@ -106,6 +108,8 @@ bool parse_args(int argc, char** argv, TrellisParams& p) {
         else if (a == "--port")                 { const char* v = need(a.c_str()); if (!v) return false; p.port = atoi(v); }
         else if (a == "--voxply")               { p.voxply = true; }
         else if (a == "--dump-slat")            { p.dump_slat = true; }
+        else if (a == "--checkpoint")           { const char* v = need(a.c_str()); if (!v) return false; p.checkpoint = v; }
+        else if (a == "--resume")               { const char* v = need(a.c_str()); if (!v) return false; p.resume = v; }
         else if (!a.empty() && a[0] == '-')     { fprintf(stderr, "[trellis] unknown option: %s\n", a.c_str()); return false; }
         else if (positional == 0)               { p.image  = a; positional = 1; }
         else if (positional == 1)               { p.output = a; positional = 2; }

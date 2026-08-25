@@ -14,6 +14,7 @@
 #include "remesh_dc.h"
 #include "stb_image_write.h"
 #include "trellis_run.h"
+#include "shape_checkpoint.h"
 
 #include <cstdio>
 #include <random>
@@ -49,7 +50,20 @@ int trellis_run(const trellis::TrellisParams& cfg) {
     // Unbuffered, not line-buffered: MSVCRT treats _IOLBF as full buffering, which
     // swallows stage progress when piped (e.g. under Lemonade) if the process crashes.
     setvbuf(stdout, nullptr, _IONBF, 0);
-    uint32_t run_seed = cfg.seed;
+    trellis::ShapeCheckpoint resumed;
+    const bool resuming = !cfg.resume.empty();
+    if (resuming) {
+        if (cfg.texture) {
+            fprintf(stderr, "[trellis] --resume currently requires --no-texture\n");
+            return 1;
+        }
+        std::string error;
+        if (!trellis::load_shape_checkpoint(cfg.resume, resumed, error)) {
+            fprintf(stderr, "[trellis] could not resume from %s: %s\n", cfg.resume.c_str(), error.c_str());
+            return 1;
+        }
+    }
+    uint32_t run_seed = resuming ? resumed.seed : cfg.seed;
     if (run_seed == 0) {
         std::random_device rd;
         run_seed = (uint32_t(rd()) << 16) ^ uint32_t(rd()) ^
@@ -68,11 +82,22 @@ int trellis_run(const trellis::TrellisParams& cfg) {
     const std::string& outglb = cfg.output;
     const std::string& M = cfg.models;
     const int gpu = cfg.gpu;
-    const bool cascade = cfg.cascade;   // 1024 cascade is the TRELLIS default; --res 512 forces the light path
+    const bool cascade = resuming ? resumed.cascade : cfg.cascade;   // 1024 cascade is the TRELLIS default; --res 512 forces the light path
     std::mt19937 rng(run_seed); std::normal_distribution<float> randn(0.f, 1.f);
     auto noise = [&](size_t n){ vector<float> v(n); for (auto& x : v) x = randn(rng); return v; };
     double t0 = now();
 
+    vector<float> cond, cond1024, neg, neg1024;
+    vector<std::array<int,3>> coords, shc;
+    vector<float> slat_norm, slat_dn, lr_norm, lr_dn;
+    int Lc = 0, Lc1024 = 0;
+    int RES = 512;
+    const float* cond_dec = nullptr;
+    const float* neg_dec = nullptr;
+    int Lc_dec = 0;
+    const bool do_tex = cfg.texture;
+
+    if (!resuming) {
     bool birefnet = cfg.birefnet == 1;
     if (cfg.birefnet < 0) {
         // Auto bg-removal. A pre-matted image keeps its own alpha (threshold path uses it
@@ -122,21 +147,21 @@ int trellis_run(const trellis::TrellisParams& cfg) {
     }
 
     printf("[2/6] DINOv3 conditioning\n");
-    vector<float> cond, cond1024;
+    cond.clear(); cond1024.clear();
     { trellis::Model m = trellis::Model::load(M + "/dinov3.gguf", gpu);
       cond = trellis::dinov3_encode(m, chw, 512);
       if (cascade) cond1024 = trellis::dinov3_encode(m, chw1024, 1024);
       m.free(); }
-    const int Lc = (int)(cond.size() / 1024);
-    vector<float> neg(cond.size(), 0.0f);
-    const int Lc1024 = cascade ? (int)(cond1024.size() / 1024) : 0;
-    vector<float> neg1024(cond1024.size(), 0.0f);
+    Lc = (int)(cond.size() / 1024);
+    neg.assign(cond.size(), 0.0f);
+    Lc1024 = cascade ? (int)(cond1024.size() / 1024) : 0;
+    neg1024.assign(cond1024.size(), 0.0f);
     printf("      cond tokens=%d%s\n", Lc, cascade ? (" / 1024-cond tokens=" + std::to_string(Lc1024)).c_str() : "");
     slat_stats("cond_512 (DINOv3@512)", cond);
     if (cascade) slat_stats("cond_1024 (DINOv3@1024)", cond1024);
 
     printf("[3/6] sparse-structure flow + decode\n");
-    vector<std::array<int,3>> coords;
+    coords.clear();
     {
         trellis::Model m = trellis::Model::load(M + "/ss_flow.gguf", gpu);
         trellis::DiTParams p; p.in_ch = 8; p.out_ch = 8; p.d_cond = 1024; p.cast_f32 = F32;
@@ -156,8 +181,6 @@ int trellis_run(const trellis::TrellisParams& cfg) {
     printf("      active voxels @res32 = %d\n", (int)coords.size());
     if (coords.empty()) { fprintf(stderr, "no voxels produced\n"); return 1; }
 
-    const bool do_tex = cfg.texture;
-
     // one shape SLAT flow run -> normalized [32,n] (sparse, CFG 7.5, gi[0.6,1], rescale_t 3)
     auto shape_flow = [&](const std::string& path, const vector<std::array<int,3>>& cds,
                           const float* cnd, const float* ncnd, int lc) {
@@ -172,13 +195,9 @@ int trellis_run(const trellis::TrellisParams& cfg) {
         return sn;
     };
 
-    vector<float> slat_norm, slat_dn;        // normalized (for tex concat) and denormalized (for decode)
-    vector<std::array<int,3>> shc;           // coords where the shape SLAT lives + is decoded
-    int RES = 512;                           // final grid resolution
-    const float* cond_dec = cond.data();     // cond used by HR shape + tex flows
-    const float* neg_dec  = neg.data();
-    int Lc_dec = Lc;
-    vector<float> lr_norm, lr_dn;            // LR (res-512) shape slat @res32 — reused for the res-512 tex path
+    cond_dec = cond.data();                  // cond used by HR shape + tex flows
+    neg_dec = neg.data();
+    Lc_dec = Lc;
     if (cascade) {
         // Cascade target resolution: 1024 (default, '1024_cascade') or e.g. 1536 ('1536_cascade').
         // Both reuse the SAME shape_flow_1024 / tex_flow_1024 / cond_1024 — only the HR quantization
@@ -236,6 +255,23 @@ int trellis_run(const trellis::TrellisParams& cfg) {
     for (int n = 0; n < N; ++n) for (int c = 0; c < 32; ++c)
         slat_dn[(size_t)c + 32*n] = slat_norm[(size_t)c + 32*n]*SHAPE_STD[c] + SHAPE_MEAN[c];
     slat_stats(cascade ? "HR slat" : "slat (res32)", slat_dn);
+    if (!cfg.checkpoint.empty()) {
+        trellis::ShapeCheckpoint checkpoint;
+        checkpoint.seed = run_seed;
+        checkpoint.resolution = RES;
+        checkpoint.cascade = cascade;
+        checkpoint.gss = cfg.gss;
+        checkpoint.gsh = cfg.gsh;
+        checkpoint.max_tokens = cfg.max_tokens;
+        checkpoint.coords = shc;
+        checkpoint.features = slat_dn;
+        std::string error;
+        if (!trellis::save_shape_checkpoint(cfg.checkpoint, checkpoint, error)) {
+            fprintf(stderr, "[trellis] could not save checkpoint %s: %s\n", cfg.checkpoint.c_str(), error.c_str());
+            return 1;
+        }
+        printf("      checkpoint -> %s\n", cfg.checkpoint.c_str());
+    }
     if (cascade && cfg.dump_slat) {   // dump HR slat for the reference-decoder diff
         FILE* f = fopen("/tmp/hr_slat.bin", "wb");
         if (f) {
@@ -244,6 +280,14 @@ int trellis_run(const trellis::TrellisParams& cfg) {
             fwrite(slat_dn.data(), 4, slat_dn.size(), f); fclose(f);
             printf("      [dump] /tmp/hr_slat.bin: N=%d res=%d feats=%zu\n", n, res, slat_dn.size());
         }
+    }
+    } else {
+        RES = resumed.resolution;
+        shc = std::move(resumed.coords);
+        slat_dn = std::move(resumed.features);
+        printf("[resume] shape checkpoint %s: seed=%u res=%d tokens=%d gss=%.3g gsh=%.3g max_tok=%d\n",
+               cfg.resume.c_str(), resumed.seed, RES, (int)shc.size(), resumed.gss, resumed.gsh, resumed.max_tokens);
+        slat_stats(cascade ? "resumed HR slat" : "resumed slat", slat_dn);
     }
 
     printf("[5/7] FlexiDualGrid shape decode -> mesh @res%d\n", RES);
